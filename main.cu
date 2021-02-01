@@ -1,4 +1,5 @@
 #include <iostream>
+#include "vec3.h"
 
 #define COL 1200
 #define ROW 600
@@ -19,6 +20,13 @@ __global__ void render(float *frame_buffer, int max_col, int max_row) {
     frame_buffer[pixel_index + 1] = float(row) / max_row;
     frame_buffer[pixel_index + 2] = 0.2;
 }
+
+__host__ void write_color(std::ostream &out, color pixel_color) {
+            int ir = int(255.99*pixel_color.x());
+            int ig = int(255.99*pixel_color.y());
+            int ib = int(255.99*pixel_color.z());
+            out << ir << " " << ig << " " << ib << "\n";
+} 
 
 int main() {
     int num_pixels = COL*ROW;
@@ -45,13 +53,8 @@ int main() {
     for(int row = ROW - 1; row >= 0; row--) {
         for(int col = 0; col < COL; col++) {
             size_t pixel_index = row*3*COL + col*3;
-            float r = frame_buffer[pixel_index + 0];
-            float g = frame_buffer[pixel_index + 1];
-            float b = frame_buffer[pixel_index + 2];
-            int ir = int(255.99*r);
-            int ig = int(255.99*g);
-            int ib = int(255.99*b);
-            std::cout << ir << " " << ig << " " << ib << "\n";
+            color pixel_color(frame_buffer[pixel_index + 0], frame_buffer[pixel_index + 1], frame_buffer[pixel_index + 2]);
+            write_color(std::cout, pixel_color);
         }
     }
 
