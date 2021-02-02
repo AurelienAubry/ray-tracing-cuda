@@ -41,9 +41,13 @@ class vec3 {
         __host__ __device__ inline float lenght_squared() const {
             return e[0]*e[0] + e[1]*e[1] + e[2]*e[2];
         }
-
+        
+    public:
         float e[3];
 };
+
+using point3 = vec3;   // 3D point
+using color = vec3;    // RGB color
 
 inline std::ostream& operator<<(std::ostream &out, const vec3 &v) {
     return out << v.e[0] << ' ' << v.e[1] << ' ' << v.e[2];
@@ -88,8 +92,5 @@ __host__ __device__ inline vec3 cross(const vec3 &u, const vec3 &v) {
 __host__ __device__ inline vec3 unit_vector(vec3 v) {
     return v / v.length();
 }
-
-using point3 = vec3;   // 3D point
-using color = vec3;    // RGB color
 
 #endif

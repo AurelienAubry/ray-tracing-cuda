@@ -1,10 +1,26 @@
 #include <iostream>
 #include "vec3.h"
+#include "ray.h"
 
 #define COL 1200
 #define ROW 600
 
-__global__ void render(float *frame_buffer, int max_col, int max_row) {
+
+__device__ color ray_color(const ray& r) {
+    color white = color(1.0, 1.0, 1.0);
+    color blue = color(0.5, 0.7, 1.0);
+    vec3 unit_direction = unit_vector(r.direction());
+    float t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*white + t*blue;
+}
+
+
+__global__ void render(color *frame_buffer, int max_col, int max_row) {
+
+    point3 origin = point3(0, 0, 0);
+    point3 lower_left_corner = point3(-2.0, -1.0, -1.0);
+    vec3 horizontal = vec3(4.0, 0.0, 0);
+    vec3 vertical = vec3(0.0, 2.0, 0);
 
     int col = threadIdx.x + blockIdx.x * blockDim.x;
     int row = threadIdx.y + blockIdx.y * blockDim.y;
@@ -15,10 +31,11 @@ __global__ void render(float *frame_buffer, int max_col, int max_row) {
     }
 
     // Pixel index in the frame buffer (each pixel = 3 floats)
-    int pixel_index = row * max_col * 3 + col * 3;
-    frame_buffer[pixel_index + 0] = float(col) / max_col;
-    frame_buffer[pixel_index + 1] = float(row) / max_row;
-    frame_buffer[pixel_index + 2] = 0.2;
+    int pixel_index = row * max_col + col;
+    float u = float(col) / float(max_col);
+    float v = float(row) / float(max_row);
+    ray r(origin, lower_left_corner + u*horizontal + v*vertical);
+    frame_buffer[pixel_index] = ray_color(r);
 }
 
 __host__ void write_color(std::ostream &out, color pixel_color) {
@@ -30,10 +47,10 @@ __host__ void write_color(std::ostream &out, color pixel_color) {
 
 int main() {
     int num_pixels = COL*ROW;
-    size_t frame_buffer_size = 3 * num_pixels * sizeof(float);
+    size_t frame_buffer_size = num_pixels * sizeof(color);
 
     // Allocate Frame Buffer
-    float *frame_buffer;
+    color *frame_buffer;
     cudaMallocManaged((void **)&frame_buffer, frame_buffer_size);
 
     // Render Frame Buffer
@@ -52,9 +69,8 @@ int main() {
     std::cout << "P3\n" << COL << " " << ROW << "\n255\n";
     for(int row = ROW - 1; row >= 0; row--) {
         for(int col = 0; col < COL; col++) {
-            size_t pixel_index = row*3*COL + col*3;
-            color pixel_color(frame_buffer[pixel_index + 0], frame_buffer[pixel_index + 1], frame_buffer[pixel_index + 2]);
-            write_color(std::cout, pixel_color);
+            size_t pixel_index = row*COL + col;
+            write_color(std::cout, frame_buffer[pixel_index]);
         }
     }
 
