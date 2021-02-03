@@ -35,10 +35,10 @@ class vec3 {
         }
 
         __host__ __device__ inline float length() const {
-            return sqrt(lenght_squared());
+            return sqrt(length_squared());
         }
 
-        __host__ __device__ inline float lenght_squared() const {
+        __host__ __device__ inline float length_squared() const {
             return e[0]*e[0] + e[1]*e[1] + e[2]*e[2];
         }
         

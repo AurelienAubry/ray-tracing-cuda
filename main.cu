@@ -1,38 +1,45 @@
 #include <iostream>
+#include <float.h>
 #include "vec3.h"
 #include "ray.h"
+#include "hittable_list.h"
+#include "sphere.h"
 
 #define COL 1200
 #define ROW 600
 
 
-__device__ bool hit_sphere(const point3& center, float radius, const ray& r) {
+__device__ float hit_sphere(const point3& center, float radius, const ray& r) {
 
     vec3 origin_center = r.origin() - center;
-    float a = dot(r.direction(), r.direction());
-    float b = 2.0 * dot(origin_center, r.direction());
-    float c = dot(origin_center, origin_center) - radius * radius;
-    float discriminant = b*b - 4*a*c;
-    return (discriminant > 0);
+    float a = r.direction().length_squared();
+    float half_b = dot(origin_center, r.direction());
+    float c = origin_center.length_squared() - radius * radius;
+    float discriminant = half_b*half_b - a*c;
+    if(discriminant < 0) {
+        return -1.0;
+    } else {
+        return (-half_b -sqrt(discriminant)) / a;
+    }
 }
 
-__device__ color ray_color(const ray& r) {
+__device__ color ray_color(const ray& r, hittable **world) {
     color white = color(1.0, 1.0, 1.0);
     color blue = color(0.5, 0.7, 1.0);
     color red = color(1.0, 0.0, 0.0);
 
-    if (hit_sphere(point3(0, 0, -1), 0.5, r)) {
-        return red;
+    hit_record rec;
+    if((*world)->hit(r, 0.0, FLT_MAX, rec)) {
+        return 0.5 * (rec.normal + color(1,1,1));
     }
-
-
+    
     vec3 unit_direction = unit_vector(r.direction());
     float t = 0.5*(unit_direction.y() + 1.0);
     return (1.0-t)*white + t*blue;
 }
 
 
-__global__ void render(color *frame_buffer, int max_col, int max_row) {
+__global__ void render(color *frame_buffer, int max_col, int max_row, hittable **world) {
 
     point3 origin = point3(0, 0, 0);
     point3 lower_left_corner = point3(-2.0, -1.0, -1.0);
@@ -52,7 +59,22 @@ __global__ void render(color *frame_buffer, int max_col, int max_row) {
     float u = float(col) / float(max_col);
     float v = float(row) / float(max_row);
     ray r(origin, lower_left_corner + u*horizontal + v*vertical);
-    frame_buffer[pixel_index] = ray_color(r);
+    frame_buffer[pixel_index] = ray_color(r, world);
+}
+
+__global__ void create_world(hittable **d_objects_list, hittable **d_world) {
+    // Make sure this is only executed once
+    if(threadIdx.x == 0 && blockIdx.x == 0) {
+        *(d_objects_list) = new sphere(vec3(0, 0, -1), 0.5);
+        *(d_objects_list+1) = new sphere(vec3(0, -100.5, -1), 100);
+        *d_world = new hittable_list(d_objects_list, 2);
+    }
+}
+
+__global__ void free_world(hittable **d_objects_list, hittable **d_world) {
+   delete *(d_objects_list);
+   delete *(d_objects_list+1);
+   delete *d_world;
 }
 
 __host__ void write_color(std::ostream &out, color pixel_color) {
@@ -70,6 +92,15 @@ int main() {
     color *frame_buffer;
     cudaMallocManaged((void **)&frame_buffer, frame_buffer_size);
 
+    // Allocate world
+    hittable **d_objects_list;
+    cudaMalloc((void **)&d_objects_list, 2*sizeof(hittable *));
+    hittable **d_world;
+    cudaMalloc((void **)&d_world, sizeof(hittable *));
+    create_world<<<1,1>>>(d_objects_list,d_world);
+    cudaDeviceSynchronize();
+
+
     // Render Frame Buffer
     int t_col = 8;
     int t_row = 8;
@@ -79,7 +110,7 @@ int main() {
     // Nb of threads in each block (one per pixel)
     dim3 threads(t_col, t_row);
 
-    render<<<blocks, threads>>>(frame_buffer, COL, ROW);
+    render<<<blocks, threads>>>(frame_buffer, COL, ROW, d_world);
     cudaDeviceSynchronize();
 
     // Output frame buffer as PPM image
@@ -91,6 +122,12 @@ int main() {
         }
     }
 
+    // Clean up
+    cudaDeviceSynchronize();
+    free_world<<<1,1>>>(d_objects_list, d_world);
+    cudaFree(d_objects_list);
+    cudaFree(d_world);
     cudaFree(frame_buffer);
 
+    cudaDeviceReset();
 }
