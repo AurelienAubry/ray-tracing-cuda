@@ -11,34 +11,42 @@
 #define COL 1200
 #define ROW 600
 
+#define checkCudaErrors(val) check_cuda( (val), #val, __FILE__, __LINE__ )
 
-__device__ float hit_sphere(const point3& center, float radius, const ray& r) {
-
-    vec3 origin_center = r.origin() - center;
-    float a = r.direction().length_squared();
-    float half_b = dot(origin_center, r.direction());
-    float c = origin_center.length_squared() - radius * radius;
-    float discriminant = half_b*half_b - a*c;
-    if(discriminant < 0) {
-        return -1.0;
-    } else {
-        return (-half_b -sqrt(discriminant)) / a;
+void check_cuda(cudaError_t result, char const *const func, const char *const file, int const line) {
+    if (result) {
+        std::cerr << "CUDA error = " << static_cast<unsigned int>(result) << " at " <<
+            file << ":" << line << " '" << func << "' \n";
+        // Make sure we call CUDA Device Reset before exiting
+        cudaDeviceReset();
+        exit(99);
     }
 }
 
-__device__ color ray_color(const ray& r, hittable **world) {
+__device__ color ray_color(const ray& r, hittable **world, curandState *local_rand_state, int max_depth) {
     color white = color(1.0, 1.0, 1.0);
     color blue = color(0.5, 0.7, 1.0);
     color red = color(1.0, 0.0, 0.0);
 
+    ray cur_ray = r;
+    float cur_attenuation = 1.0f;
+    for(int i = 0; i < max_depth; i++) {
     hit_record rec;
-    if((*world)->hit(r, 0.0, FLT_MAX, rec)) {
-        return 0.5 * (rec.normal + color(1,1,1));
+        if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {
+            vec3 target = rec.hit_point + rec.normal + random_in_unit_sphere(local_rand_state);
+            cur_attenuation *= 0.5f;
+            cur_ray = ray(rec.hit_point, target-rec.hit_point);
+        } else {
+            vec3 unit_direction = unit_vector(r.direction());
+            float t = 0.5f*(unit_direction.y() + 1.0f);
+            vec3 c = (1.0f-t)*white + t*blue;
+            return cur_attenuation * c;
+        }
     }
-    
-    vec3 unit_direction = unit_vector(r.direction());
-    float t = 0.5*(unit_direction.y() + 1.0);
-    return (1.0-t)*white + t*blue;
+    //return cur_attenuation * color(0,0,0);
+
+    return vec3(0.0,0.0,0.0); // exceeded recursion
+   
 }
 
 __global__ void render_init(int max_row, int max_col, curandState *rand_state) {
@@ -56,12 +64,7 @@ __global__ void render_init(int max_row, int max_col, curandState *rand_state) {
     curand_init(2021, pixel_index, 0, &rand_state[pixel_index]);
 }
 
-__global__ void render(color *frame_buffer, int max_col, int max_row, camera **cam, hittable **world, curandState *rand_state, int samples_per_pixel) {
-
-    point3 origin = point3(0, 0, 0);
-    point3 lower_left_corner = point3(-2.0, -1.0, -1.0);
-    vec3 horizontal = vec3(4.0, 0.0, 0);
-    vec3 vertical = vec3(0.0, 2.0, 0);
+__global__ void render(color *frame_buffer, int max_col, int max_row, camera **cam, hittable **world, curandState *rand_state, int samples_per_pixel, int max_depth) {
 
     int col = threadIdx.x + blockIdx.x * blockDim.x;
     int row = threadIdx.y + blockIdx.y * blockDim.y;
@@ -79,8 +82,8 @@ __global__ void render(color *frame_buffer, int max_col, int max_row, camera **c
     for(int s = 0; s < samples_per_pixel; s++) {
         float u = float(col + curand_uniform(&local_rand_state)) / float(max_col);
         float v = float(row + curand_uniform(&local_rand_state)) / float(max_row);
-        ray r(origin, lower_left_corner + u*horizontal + v*vertical);
-        pixel_color += ray_color(r, world);
+        ray r = (*cam)->get_ray(u,v);
+        pixel_color += ray_color(r, world, &local_rand_state, max_depth);
     }
     
     frame_buffer[pixel_index] = pixel_color;
@@ -115,9 +118,9 @@ __host__ void write_color(std::ostream &out, color pixel_color, int samples_per_
             float b = pixel_color.z();
 
             float scale = 1.0 / samples_per_pixel;
-            r *= scale;
-            g *= scale;
-            b *= scale;
+            r = sqrt(r * scale);
+            g = sqrt(g * scale);
+            b = sqrt(b * scale);
 
             int ir = int(255.99*clamp(r, 0.0, 0.999));
             int ig = int(255.99*clamp(g, 0.0, 0.999));
@@ -126,23 +129,26 @@ __host__ void write_color(std::ostream &out, color pixel_color, int samples_per_
 } 
 
 int main() {
+    cudaDeviceReset();
     const int num_pixels = COL*ROW;
     const int samples_per_pixel = 100;
+    const int max_depth = 50;
     size_t frame_buffer_size = num_pixels * sizeof(color);
 
     // Allocate Frame Buffer
     color *frame_buffer;
-    cudaMallocManaged((void **)&frame_buffer, frame_buffer_size);
+    checkCudaErrors(cudaMallocManaged((void **)&frame_buffer, frame_buffer_size));
 
     // Allocate world
     hittable **d_objects_list;
-    cudaMalloc((void **)&d_objects_list, 2*sizeof(hittable *));
+    checkCudaErrors(cudaMalloc((void **)&d_objects_list, 2*sizeof(hittable *)));
     hittable **d_world;
-    cudaMalloc((void **)&d_world, sizeof(hittable *));
+    checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hittable *)));
     camera **d_camera;
-    cudaMalloc((void **)&d_camera, sizeof(camera *));
+    checkCudaErrors(cudaMalloc((void **)&d_camera, sizeof(camera *)));
     create_world<<<1,1>>>(d_objects_list, d_world, d_camera);
-    cudaDeviceSynchronize();
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
 
 
     // Render Frame Buffer
@@ -156,13 +162,15 @@ int main() {
 
     // List of pixels random number generator states
     curandState *d_rand_state;
-    cudaMalloc((void**)&d_rand_state, num_pixels*sizeof(curandState));
+    checkCudaErrors(cudaMalloc((void**)&d_rand_state, num_pixels*sizeof(curandState)));
 
     render_init<<<blocks, threads>>>(COL, ROW, d_rand_state);
-    cudaDeviceSynchronize();
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
 
-    render<<<blocks, threads>>>(frame_buffer, COL, ROW, d_camera, d_world, d_rand_state, samples_per_pixel);
-    cudaDeviceSynchronize();
+    render<<<blocks, threads>>>(frame_buffer, COL, ROW, d_camera, d_world, d_rand_state, samples_per_pixel, max_depth);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
 
     // Output frame buffer as PPM image
     std::cout << "P3\n" << COL << " " << ROW << "\n255\n";
@@ -174,11 +182,13 @@ int main() {
     }
 
     // Clean up
-    cudaDeviceSynchronize();
+    checkCudaErrors(cudaDeviceSynchronize());
     free_world<<<1,1>>>(d_objects_list, d_world, d_camera);
-    cudaFree(d_objects_list);
-    cudaFree(d_world);
-    cudaFree(frame_buffer);
-
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaFree(d_camera));
+    checkCudaErrors(cudaFree(d_world));
+    checkCudaErrors(cudaFree(d_objects_list));
+    checkCudaErrors(cudaFree(d_rand_state));
+    checkCudaErrors(cudaFree(frame_buffer));
     cudaDeviceReset();
 }

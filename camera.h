@@ -8,9 +8,9 @@ class camera {
     public:
         __device__ camera() {
             float aspect_ratio = 16.0 / 9.0;
-            float viewport_height = 2.0;
+            float viewport_height = 3.0;
             float viewport_width = aspect_ratio * viewport_height;
-            float focal_length = 1.0;
+            float focal_length = 1.0f;
 
             origin = point3(0, 0, 0);
             horizontal = vec3(viewport_width, 0, 0);

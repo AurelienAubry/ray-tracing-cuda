@@ -41,6 +41,10 @@ class vec3 {
         __host__ __device__ inline float length_squared() const {
             return e[0]*e[0] + e[1]*e[1] + e[2]*e[2];
         }
+
+        __device__ inline static vec3 random(curandState *local_rand_state) {
+            return vec3(curand_uniform(local_rand_state), curand_uniform(local_rand_state), curand_uniform(local_rand_state));
+        }
         
     public:
         float e[3];
@@ -91,6 +95,15 @@ __host__ __device__ inline vec3 cross(const vec3 &u, const vec3 &v) {
 
 __host__ __device__ inline vec3 unit_vector(vec3 v) {
     return v / v.length();
+}
+
+ __device__ vec3 random_in_unit_sphere(curandState *local_rand_state) {
+    vec3 p;
+    while(true) {
+        p = 2.0f * vec3::random(local_rand_state) - vec3(1.0f,1.0f,1.0f);
+        if (p.length_squared() >= 1.0f) continue;
+        return p;
+    }
 }
 
 #endif
