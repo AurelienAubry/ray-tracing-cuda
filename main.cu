@@ -7,6 +7,7 @@
 #include "hittable_list.h"
 #include "sphere.h"
 #include "camera.h"
+#include "material.h"
 
 #define COL 1200
 #define ROW 600
@@ -29,13 +30,19 @@ __device__ color ray_color(const ray& r, hittable **world, curandState *local_ra
     color red = color(1.0, 0.0, 0.0);
 
     ray cur_ray = r;
-    float cur_attenuation = 1.0f;
+    color cur_attenuation = color(1.0, 1.0, 1.0);
     for(int i = 0; i < max_depth; i++) {
     hit_record rec;
         if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {
-            vec3 target = rec.hit_point + rec.normal + random_in_unit_sphere(local_rand_state);
-            cur_attenuation *= 0.5f;
-            cur_ray = ray(rec.hit_point, target-rec.hit_point);
+            ray scattered;
+            color attenuation;
+            if(rec.mat_ptr->scatter(r, rec, attenuation, scattered, local_rand_state)) {
+                cur_attenuation *= attenuation;
+                cur_ray = scattered;
+            } else {
+                return color(0.0,0.0,0.0);
+            }
+            
         } else {
             vec3 unit_direction = unit_vector(r.direction());
             float t = 0.5f*(unit_direction.y() + 1.0f);
@@ -45,7 +52,7 @@ __device__ color ray_color(const ray& r, hittable **world, curandState *local_ra
     }
     //return cur_attenuation * color(0,0,0);
 
-    return vec3(0.0,0.0,0.0); // exceeded recursion
+    return color(0.0,0.0,0.0); // exceeded recursion
    
 }
 
@@ -92,9 +99,10 @@ __global__ void render(color *frame_buffer, int max_col, int max_row, camera **c
 __global__ void create_world(hittable **d_objects_list, hittable **d_world, camera **d_camera) {
     // Make sure this is only executed once
     if(threadIdx.x == 0 && blockIdx.x == 0) {
-        *(d_objects_list) = new sphere(vec3(0, 0, -1), 0.5);
-        *(d_objects_list+1) = new sphere(vec3(0, -100.5, -1), 100);
-        *d_world = new hittable_list(d_objects_list, 2);
+        *(d_objects_list) = new sphere(vec3(0, 0, -1), 0.5, new lambertian(color(0.1, 0.2, 0.5)));
+        *(d_objects_list+1) = new sphere(vec3(-1, 0, -1), 0.5, new metal(color(0.8, 0.8, 0.5)));
+        *(d_objects_list+2) = new sphere(vec3(0, -100.5, -1), 100, new lambertian(color(0.8, 0.8, 0.0)));
+        *d_world = new hittable_list(d_objects_list, 3);
         *d_camera   = new camera();
     }
 }
@@ -102,6 +110,7 @@ __global__ void create_world(hittable **d_objects_list, hittable **d_world, came
 __global__ void free_world(hittable **d_objects_list, hittable **d_world, camera **d_camera) {
    delete *(d_objects_list);
    delete *(d_objects_list+1);
+   delete *(d_objects_list+2);
    delete *d_world;
    delete *d_camera;
 }
@@ -141,7 +150,7 @@ int main() {
 
     // Allocate world
     hittable **d_objects_list;
-    checkCudaErrors(cudaMalloc((void **)&d_objects_list, 2*sizeof(hittable *)));
+    checkCudaErrors(cudaMalloc((void **)&d_objects_list, 3*sizeof(hittable *)));
     hittable **d_world;
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hittable *)));
     camera **d_camera;
