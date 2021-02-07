@@ -49,7 +49,7 @@ __device__ color ray_color(const ray& r, hittable **world, curandState *local_ra
    
 }
 
-__global__ void render_init(int max_row, int max_col, curandState *rand_state) {
+__global__ void render_init(int max_col, int max_row, curandState *rand_state) {
     int col = threadIdx.x + blockIdx.x * blockDim.x;
     int row = threadIdx.y + blockIdx.y * blockDim.y;
 
