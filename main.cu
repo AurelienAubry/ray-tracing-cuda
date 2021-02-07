@@ -36,7 +36,7 @@ __device__ color ray_color(const ray& r, hittable **world, curandState *local_ra
         if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {
             ray scattered;
             color attenuation;
-            if(rec.mat_ptr->scatter(r, rec, attenuation, scattered, local_rand_state)) {
+            if(rec.mat_ptr->scatter(cur_ray, rec, attenuation, scattered, local_rand_state)) {
                 cur_attenuation *= attenuation;
                 cur_ray = scattered;
             } else {
@@ -92,7 +92,7 @@ __global__ void render(color *frame_buffer, int max_col, int max_row, camera **c
         ray r = (*cam)->get_ray(u,v);
         pixel_color += ray_color(r, world, &local_rand_state, max_depth);
     }
-    
+    rand_state[pixel_index] = local_rand_state;
     frame_buffer[pixel_index] = pixel_color;
 }
 
@@ -100,9 +100,11 @@ __global__ void create_world(hittable **d_objects_list, hittable **d_world, came
     // Make sure this is only executed once
     if(threadIdx.x == 0 && blockIdx.x == 0) {
         *(d_objects_list) = new sphere(vec3(0, 0, -1), 0.5, new lambertian(color(0.1, 0.2, 0.5)));
-        *(d_objects_list+1) = new sphere(vec3(-1, 0, -1), 0.5, new metal(color(0.8, 0.8, 0.5)));
-        *(d_objects_list+2) = new sphere(vec3(0, -100.5, -1), 100, new lambertian(color(0.8, 0.8, 0.0)));
-        *d_world = new hittable_list(d_objects_list, 3);
+        *(d_objects_list+1) = new sphere(vec3(1, 0, -1), 0.5, new metal(color(0.8, 0.8, 0.5), 0.5));
+        *(d_objects_list+2) = new sphere(vec3(-1, 0, -1), 0.5, new dielectric(1.5));
+        *(d_objects_list+3) = new sphere(vec3(-1, 0, -1), -0.4, new dielectric(1.5));
+        *(d_objects_list+4) = new sphere(vec3(0, -100.5, -1), 100, new lambertian(color(0.8, 0.8, 0.0)));
+        *d_world = new hittable_list(d_objects_list, 5);
         *d_camera   = new camera();
     }
 }
@@ -111,6 +113,8 @@ __global__ void free_world(hittable **d_objects_list, hittable **d_world, camera
    delete *(d_objects_list);
    delete *(d_objects_list+1);
    delete *(d_objects_list+2);
+   delete *(d_objects_list+3);
+   delete *(d_objects_list+4);
    delete *d_world;
    delete *d_camera;
 }
@@ -150,7 +154,7 @@ int main() {
 
     // Allocate world
     hittable **d_objects_list;
-    checkCudaErrors(cudaMalloc((void **)&d_objects_list, 3*sizeof(hittable *)));
+    checkCudaErrors(cudaMalloc((void **)&d_objects_list, 5*sizeof(hittable *)));
     hittable **d_world;
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hittable *)));
     camera **d_camera;
