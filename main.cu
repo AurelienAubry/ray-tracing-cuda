@@ -89,7 +89,7 @@ __global__ void render(color *frame_buffer, int max_col, int max_row, camera **c
     for(int s = 0; s < samples_per_pixel; s++) {
         float u = float(col + curand_uniform(&local_rand_state)) / float(max_col);
         float v = float(row + curand_uniform(&local_rand_state)) / float(max_row);
-        ray r = (*cam)->get_ray(u,v);
+        ray r = (*cam)->get_ray(u,v, &local_rand_state);
         pixel_color += ray_color(r, world, &local_rand_state, max_depth);
     }
     rand_state[pixel_index] = local_rand_state;
@@ -105,7 +105,12 @@ __global__ void create_world(hittable **d_objects_list, hittable **d_world, came
         *(d_objects_list+3) = new sphere(vec3(-1, 0, -1), -0.4, new dielectric(1.5));
         *(d_objects_list+4) = new sphere(vec3(0, -100.5, -1), 100, new lambertian(color(0.8, 0.8, 0.0)));
         *d_world = new hittable_list(d_objects_list, 5);
-        *d_camera   = new camera(point3(-2, 2, 1), point3(0, 0, -1), vec3(0, 1, 0), 20, 16.0 / 9.0);
+        point3 lookfrom(3, 3, 2);
+        point3 lookat(0, 0, -1);
+        vec3 vup(0, 1, 0);
+        float dist_to_focus = (lookfrom - lookat).length();
+        float aperture = 2.0;
+        *d_camera   = new camera(lookfrom, lookat, vup, 20, 16.0 / 9.0, aperture, dist_to_focus);
     }
 }
 

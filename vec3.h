@@ -122,4 +122,12 @@ __device__ vec3 random_unit_vector(curandState *local_rand_state) {
     return unit_vector(random_in_unit_sphere(local_rand_state));
 }
 
+__device__ vec3 random_in_unit_disk(curandState *local_rand_state) {
+    while (true) {
+        vec3 p = vec3(curand_uniform(local_rand_state), curand_uniform(local_rand_state), 0);
+        if (p.length_squared() >= 1) continue;
+        return p;
+    }
+}
+
 #endif
