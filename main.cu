@@ -9,8 +9,8 @@
 #include "camera.h"
 #include "material.h"
 
-#define COL 1200
-#define ROW 600
+#define COL 600
+#define ROW 300
 
 #define checkCudaErrors(val) check_cuda( (val), #val, __FILE__, __LINE__ )
 
@@ -105,7 +105,7 @@ __global__ void create_world(hittable **d_objects_list, hittable **d_world, came
         *(d_objects_list+3) = new sphere(vec3(-1, 0, -1), -0.4, new dielectric(1.5));
         *(d_objects_list+4) = new sphere(vec3(0, -100.5, -1), 100, new lambertian(color(0.8, 0.8, 0.0)));
         *d_world = new hittable_list(d_objects_list, 5);
-        *d_camera   = new camera();
+        *d_camera   = new camera(point3(-2, 2, 1), point3(0, 0, -1), vec3(0, 1, 0), 20, 16.0 / 9.0);
     }
 }
 
